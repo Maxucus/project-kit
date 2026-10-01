@@ -67,11 +67,21 @@ def initialize(project: Path, intent: ProjectIntent, bundle: Bundle) -> Report:
         operation = contained_path(project, '.project-kit/operation.json')
         state = json.loads(operation.read_text()) if operation.exists() else {}
         identity = digest_data({'intent': json_data(intent), 'bundle': bundle.digest})
+        applied = contained_path(project, 'project-kit.lock.yaml')
+        if not state and applied.exists():
+            from .config import read_lock
+            lock = read_lock(applied)
+            if lock.kit_commit != bundle.kit_commit or lock.profile != bundle.profile or lock.render_inputs != json_data(intent):
+                return Report(str(project), 'incompatible', (Check('init', 'incompatible', 'Applied inputs differ; use upgrade'),))
+            state = {'schema': 1, 'identity': identity, 'bundle': json_data(bundle), 'intent': json_data(intent),
+                     'generated': len(intent.generation), 'candidate': json_data(lock), 'restore': True}
         if state and state.get('identity') != identity:
             return Report(str(project), 'incompatible', (Check('operation', 'incompatible', 'Pending operation has different inputs'),))
         writes = {}
         for relative, desired in rendered.items():
             target = contained_path(project, relative)
+            if state.get('restore'):
+                continue
             if target.exists():
                 current = target.read_bytes()
                 if relative in MIXED:
@@ -109,7 +119,16 @@ def initialize(project: Path, intent: ProjectIntent, bundle: Bundle) -> Report:
         state['adapter_baseline'] = {k: v.decode() for k, v in expected.items()}
         state['candidate'] = json_data(make_lock(intent, bundle, {**rendered, **expected}, ownership))
         write_atomic(operation, (json.dumps(state, ensure_ascii=False, indent=2) + '\n').encode())
-        return Report(str(project), 'incomplete', (Check('agents', 'incomplete', 'Connect and verify native agent runtimes'),), tuple(changed))
+        from .check import check_project
+        from .config import lock_from_data
+        result = check_project(project, runtime=True, expected=lock_from_data(state['candidate']))
+        if result.status == 'ready':
+            content = yaml.safe_dump(state['candidate'], allow_unicode=True, sort_keys=True).encode()
+            if not applied.exists() or applied.read_bytes() != content:
+                write_atomic(applied, content)
+                changed.append('project-kit.lock.yaml')
+            operation.unlink()
+        return Report(str(project), result.status, result.checks, tuple(changed))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         return Report(str(project), 'incomplete', (Check('init', 'incomplete', str(exc)),), tuple(changed))
 
@@ -124,11 +143,15 @@ def restore(project: Path) -> Report:
         state = json.loads(operation.read_text())
         return initialize(project, intent_from_data(state['intent']), bundle_from_data(state['bundle']))
     lock = read_lock(contained_path(project, 'project-kit.lock.yaml'))
-    bundle = restore_bundle(lock, contained_path(project, '.project-kit/runtime'))
+    from .check import bundle_for_lock
+    try:
+        bundle = bundle_for_lock(project, lock)
+    except FileNotFoundError:
+        bundle = restore_bundle(lock, contained_path(project, '.project-kit/runtime'))
     intent = intent_from_data(lock.render_inputs)
     # Mark generation complete before resuming: a restored checkout owns its code.
     state = {'schema': 1, 'identity': digest_data({'intent': json_data(intent), 'bundle': bundle.digest}),
              'bundle': json_data(bundle), 'intent': json_data(intent), 'generated': len(intent.generation),
              'candidate': json_data(lock), 'restore': True}
     write_atomic(operation, (json.dumps(state, ensure_ascii=False, indent=2) + '\n').encode())
-    return Report(str(project), 'incomplete', (Check('agents', 'incomplete', 'Restore native agent configuration'),))
+    return initialize(project, intent, bundle)

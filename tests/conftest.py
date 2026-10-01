@@ -13,6 +13,7 @@ def no_live_clients(monkeypatch):
     def unavailable(*args, **kwargs):
         raise FileNotFoundError('Native clients are exercised separately from offline tests')
     monkeypatch.setattr(native, 'run', unavailable)
+    monkeypatch.setattr(native, 'runtime', unavailable)
 
 def git(root, *args):
     return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
@@ -55,3 +56,29 @@ def config():
 def bundle(kit,config,tmp_path):
     from project_kit.sources import prepare_bundle
     return prepare_bundle(kit,config,tmp_path/'cache')
+
+@pytest.fixture
+def ready_clients(monkeypatch):
+    from project_kit.adapters import native
+    monkeypatch.setattr(native,'version',lambda *args:'fixture-client-1')
+    monkeypatch.setattr(native,'inventory',lambda *args:[])
+    def observed(agent,project):
+        market=json.loads((project/'.agents/plugins/marketplace.json').read_text())
+        packages=[]
+        for entry in market['plugins']:
+            root=project/entry['source']['path']
+            packages.append({'id':entry['name']+'@'+market['name'],'name':entry['name'],'enabled':True,
+                             'root':str(root),'skills':[str(p) for p in (root/'skills').glob('*/SKILL.md')],
+                             'hooks':[],'mcp':[]})
+        return {'packages':packages,'errors':[]}
+    monkeypatch.setattr(native,'runtime',observed)
+    return native
+
+@pytest.fixture
+def ready_project(tmp_path,intent_data,bundle,ready_clients):
+    from project_kit.init import initialize
+    from project_kit.config import intent_from_data
+    root=tmp_path/'project'
+    report=initialize(root,intent_from_data(intent_data),bundle)
+    assert report.status=='ready',report
+    return root

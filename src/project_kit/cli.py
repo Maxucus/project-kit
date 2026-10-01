@@ -19,9 +19,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     init.add_argument('--intent', type=Path)
     init.add_argument('--config', type=Path)
     init.add_argument('--json', action='store_true')
+    check = commands.add_parser('check', help='Audit files and optionally native runtime')
+    check.add_argument('--project', type=Path, required=True)
+    check.add_argument('--runtime', action='store_true')
+    check.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
-        if not any((args.kit, args.intent, args.config)):
+        if args.command == 'check':
+            from .check import check_project
+            report = check_project(args.project, args.runtime)
+        elif not any((args.kit, args.intent, args.config)):
             report = restore(args.project)
         else:
             if not all((args.kit, args.intent, args.config)):

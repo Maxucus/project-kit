@@ -1,5 +1,5 @@
 """Project-scoped configuration; no writes to user/global agent settings."""
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import json
 from pathlib import Path
@@ -46,6 +46,23 @@ def encode(value) -> bytes:
     return (json.dumps(value, ensure_ascii=False, indent=2) + '\n').encode()
 
 
+def declared_capabilities(root: Path, agent: AgentId) -> dict[str, int]:
+    manifest_path = '.codex-plugin/plugin.json' if agent == 'codex' else '.claude-plugin/plugin.json'
+    manifest = json.loads(contained_path(root, manifest_path).read_text())
+    hooks = manifest.get('hooks')
+    if hooks is None:
+        hooks = 'hooks/hooks.json' if (root / 'hooks/hooks.json').exists() else {}
+    if isinstance(hooks, str):
+        hooks = json.loads(contained_path(root, hooks).read_text())
+    hooks = hooks.get('hooks', hooks)
+    hook_count = sum(len(group.get('hooks', [])) for groups in hooks.values() for group in groups)
+    mcp = manifest.get('mcpServers', {})
+    if isinstance(mcp, str):
+        mcp = json.loads(contained_path(root, mcp).read_text())
+    servers = mcp.get('mcpServers', mcp)
+    return {'hooks': hook_count, 'mcp': len(servers)}
+
+
 def materialize(project: Path, bundle: Bundle) -> None:
     target = runtime_root(project, bundle)
     # Verify every package before any copy, including a pre-existing destination.
@@ -60,6 +77,13 @@ def materialize(project: Path, bundle: Bundle) -> None:
         if not destination.exists():
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(package.root, destination, symlinks=True)
+    descriptor = asdict(bundle)
+    for package in descriptor['packages']:
+        package['root'] = f"plugins/{package['name']}"
+    path = target / 'bundle.json'
+    payload = encode(descriptor)
+    if not path.exists() or path.read_bytes() != payload:
+        write_atomic(path, payload)
 
 
 def configure(project: Path, bundle: Bundle, baseline: dict[str, bytes] | None = None) -> tuple[dict[str, bytes], dict, dict[str, bytes]]:
@@ -123,8 +147,11 @@ def common_observe(agent: AgentId, project: Path, bundle: Bundle, runtime: bool)
                 if entries is None:
                     return Check(name, 'incomplete', f'{identifier}: {capability} state unavailable'), None
                 policy = bundle.profile[capability]
-                if policy is False and entries:
+                declared = declared_capabilities(package.root, agent)[capability]
+                if policy is False and (entries or declared):
                     return Check(name, 'incompatible', f'{identifier}: profile disables bundled {capability}; select a supported package/profile'), None
+                if policy is not False and len(entries) < declared:
+                    return Check(name, 'incomplete', f'{identifier}: native {capability} discovery is incomplete'), None
                 if policy is not False and any(not e.get('ready') for e in entries):
                     return Check(name, 'incomplete', f'{identifier}: review/trust or configure native {capability}'), None
             observed[package.name] = package.digest
