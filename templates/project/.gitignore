@@ -1,0 +1,6 @@
+# BEGIN PROJECT-KIT
+.project-kit/runtime/
+.project-kit/operation.json
+.project-kit/observations/
+.claude/settings.local.json
+# END PROJECT-KIT
