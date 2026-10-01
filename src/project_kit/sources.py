@@ -7,8 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-from .config import read_yaml
-from .models import Bundle, Check, KitConfig, Package
+from .config import read_yaml, config_from_data
+from .models import Bundle, Check, KitConfig, Package, Lock
 
 
 def git(root: Path, *args: str) -> str:
@@ -125,3 +125,25 @@ def verify_bundle(bundle: Bundle) -> tuple[Check, ...]:
             valid = False
         results.append(Check(f'package:{package.name}', 'ready' if valid else 'drift', package.commit))
     return tuple(results)
+
+
+def restore_bundle(lock: Lock, cache: Path) -> Bundle:
+    """Resolve the applied commit without advancing a branch or a floating tag."""
+    config = config_from_data(lock.profile['_config'])
+    local = Path(lock.kit_source)
+    if local.is_dir() and git(local, 'rev-parse', 'HEAD') == lock.kit_commit:
+        source = local
+    else:
+        source = cache / 'sources' / lock.kit_commit
+        if not source.exists():
+            source.parent.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(['git', 'clone', '--no-checkout', '--no-hardlinks', '--', lock.kit_source, str(source)],
+                                    capture_output=True, timeout=120)
+            if result.returncode:
+                raise ValueError('Pinned kit source unavailable; configure Git access and retry init')
+        git(source, 'checkout', '--detach', lock.kit_commit)
+        git(source, 'submodule', 'update', '--init', '--recursive')
+    bundle = prepare_bundle(source, config, cache / 'bundles')
+    if bundle.profile != lock.profile or {p.name: p.digest for p in bundle.packages} != lock.package_digests:
+        raise ValueError('Restored source differs from applied lock')
+    return bundle
