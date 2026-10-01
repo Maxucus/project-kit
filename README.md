@@ -7,7 +7,7 @@
 Нужны Git, Python 3.11+ и [uv](https://docs.astral.sh/uv/). Внешние пакеты закреплены Git submodules; вложенность сохраняет их историю и точный commit.
 
 ```bash
-git clone --recurse-submodules https://github.com/Maxucus/project-kit.git
+git clone --recurse-submodules --branch feat/project-kit-v1 https://github.com/Maxucus/project-kit.git
 cd project-kit
 uv sync --locked
 ```
