@@ -1,0 +1,3 @@
+<!-- BEGIN PROJECT-KIT -->
+@AGENTS.md
+<!-- END PROJECT-KIT -->

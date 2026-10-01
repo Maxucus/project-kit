@@ -1,0 +1,10 @@
+schema: 1
+packages: [project-kit, superpowers, ecc]
+agents: [codex, claude-code]
+workflows:
+  discovery: superpowers:brainstorming
+  planning: superpowers:writing-plans
+  verification: superpowers:verification-before-completion
+  technical: ecc
+hooks: native
+mcp: native

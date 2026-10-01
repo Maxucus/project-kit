@@ -1,0 +1,14 @@
+name: Health API
+goal: Проверять доступность сервиса через GET /health.
+users: [Оператор]
+scope: Один HTTP endpoint; аутентификация и хранение данных вне задачи.
+constraints: [Node.js 22+, Стандартная библиотека, JSON, Временный локальный порт в тесте]
+decisions:
+  - "node:http: достаточен для одного endpoint; фреймворк увеличил бы зависимости без нужной функции."
+success:
+  - 'GET /health возвращает HTTP 200 и {"status":"ok"}.'
+  - Неизвестный маршрут возвращает 404.
+task_source: GitHub Issues проекта
+commands:
+  run: [node, server.mjs]
+generation: []

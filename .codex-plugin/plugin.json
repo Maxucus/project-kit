@@ -1,0 +1,6 @@
+{
+  "name": "project-kit",
+  "version": "0.1.0",
+  "description": "Compact project context, initialization, readiness and upgrades.",
+  "skills": "./skills/"
+}
