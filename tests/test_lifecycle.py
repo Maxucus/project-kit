@@ -61,3 +61,8 @@ def test_lifecycle(kind,tmp_path,kit,ready_clients,capsys):
     capsys.readouterr()
     assert main(['check','--project',str(project),'--runtime','--json'])==0
     capsys.readouterr()
+
+def test_installed_cli_works_outside_source_checkout(tmp_path):
+    result=subprocess.run([sys.executable,'-m','project_kit','--help'],cwd=tmp_path,capture_output=True,text=True)
+    assert result.returncode==0,result.stderr
+    assert 'init' in result.stdout and 'upgrade' in result.stdout
