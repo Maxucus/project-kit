@@ -1,0 +1,6 @@
+[submodule "upstream/superpowers"]
+	path = upstream/superpowers
+	url = https://github.com/obra/superpowers.git
+[submodule "upstream/ecc"]
+	path = upstream/ecc
+	url = https://github.com/affaan-m/ECC.git

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["hatchling>=1.26,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "project-kit"
+version = "0.1.0"
+description = "Versioned project context and agent scaffolding"
+requires-python = ">=3.11"
+dependencies = ["PyYAML>=6,<7", "tomlkit>=0.15,<1"]
+
+[project.scripts]
+project-kit = "project_kit.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8,<10"]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/project_kit"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
