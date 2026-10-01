@@ -23,9 +23,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     check.add_argument('--project', type=Path, required=True)
     check.add_argument('--runtime', action='store_true')
     check.add_argument('--json', action='store_true')
+    upgrade = commands.add_parser('upgrade', help='Prepare a pinned kit update in a separate worktree')
+    upgrade.add_argument('--project', type=Path, required=True)
+    upgrade.add_argument('--kit', type=Path, required=True)
+    upgrade.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
     try:
-        if args.command == 'check':
+        if args.command == 'upgrade':
+            from .upgrade import prepare_upgrade
+            report = prepare_upgrade(args.project, args.kit)
+        elif args.command == 'check':
             from .check import check_project
             report = check_project(args.project, args.runtime)
         elif not any((args.kit, args.intent, args.config)):

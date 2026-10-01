@@ -141,6 +141,13 @@ def restore(project: Path) -> Report:
     operation = contained_path(project, '.project-kit/operation.json')
     if operation.exists():
         state = json.loads(operation.read_text())
+        if state.get('kind') == 'upgrade':
+            applied = read_lock(contained_path(project, 'project-kit.lock.yaml'))
+            digest = digest_data({'commit': applied.kit_commit, 'profile': applied.profile, 'packages': applied.package_digests})
+            if digest == state['target']:
+                operation.unlink()  # The reviewed upgrade has reached this checkout.
+                return restore(project)
+            return Report(str(project), 'incompatible', (Check('operation', 'incompatible', 'Upgrade pending; resume upgrade or resolve its journal'),))
         return initialize(project, intent_from_data(state['intent']), bundle_from_data(state['bundle']))
     lock = read_lock(contained_path(project, 'project-kit.lock.yaml'))
     from .check import bundle_for_lock

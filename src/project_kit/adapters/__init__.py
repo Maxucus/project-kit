@@ -86,7 +86,8 @@ def materialize(project: Path, bundle: Bundle) -> None:
         write_atomic(path, payload)
 
 
-def configure(project: Path, bundle: Bundle, baseline: dict[str, bytes] | None = None) -> tuple[dict[str, bytes], dict, dict[str, bytes]]:
+def configure(project: Path, bundle: Bundle, baseline: dict[str, bytes] | None = None,
+              previous_ownership: dict | None = None) -> tuple[dict[str, bytes], dict, dict[str, bytes]]:
     """Preflight all mixed files before applying either adapter."""
     baseline = baseline or {}
     writes, ownership, expected = {}, {}, {}
@@ -99,8 +100,9 @@ def configure(project: Path, bundle: Bundle, baseline: dict[str, bytes] | None =
             current = target.read_bytes() if target.exists() else b''
             if entry:
                 ownership[relative] = entry
+                paths = entry['paths'] + (previous_ownership or {}).get(relative, {}).get('paths', [])
                 desired = merge_owned(current, baseline.get(relative, b''), desired, entry['kind'],
-                                      tuple(tuple(p) for p in entry['paths']))
+                                      tuple(dict.fromkeys(tuple(p) for p in paths)))
             elif current and current != desired and baseline.get(relative) != current:
                 raise MergeConflict(f'managed configuration changed: {relative}')
             if current != desired:
