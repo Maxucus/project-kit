@@ -46,10 +46,12 @@ def make_lock(intent: ProjectIntent, bundle: Bundle, rendered: dict[str, bytes],
         ownership[relative] = {'kind': 'markdown', 'paths': [['PROJECT-KIT']]}
     hashes = {}
     for relative, data in rendered.items():
+        if relative == '.claude/settings.local.json' or relative.startswith('.project-kit/runtime/'):
+            continue
         if relative in ownership:
             entry = ownership[relative]
             hashes[relative] = owned_digest(data, entry['kind'], tuple(tuple(p) for p in entry['paths']))
-        elif relative.startswith('.project-kit/core/'):
+        elif relative.startswith('.project-kit/core/') or relative == '.agents/plugins/marketplace.json':
             hashes[relative] = hashlib.sha256(data).hexdigest()
     return Lock(1, bundle.kit_source, bundle.kit_commit, bundle.profile, digest_data(bundle.profile),
                 json_data(intent), {p.name: p.digest for p in bundle.packages}, hashes, ownership)
@@ -100,6 +102,13 @@ def initialize(project: Path, intent: ProjectIntent, bundle: Bundle) -> Report:
                 raise ValueError(f'generation step {index + 1} failed (exit {result.returncode}); resolve before resuming init')
             state['generated'] = index + 1
             write_atomic(operation, (json.dumps(state, ensure_ascii=False, indent=2) + '\n').encode())
+        from .adapters import configure
+        baseline = {k: v.encode() for k, v in state.get('adapter_baseline', {}).items()}
+        adapter_writes, ownership, expected = configure(project, bundle, baseline)
+        changed.extend(p for p in adapter_writes if not p.startswith('.project-kit/runtime/') and p != '.claude/settings.local.json')
+        state['adapter_baseline'] = {k: v.decode() for k, v in expected.items()}
+        state['candidate'] = json_data(make_lock(intent, bundle, {**rendered, **expected}, ownership))
+        write_atomic(operation, (json.dumps(state, ensure_ascii=False, indent=2) + '\n').encode())
         return Report(str(project), 'incomplete', (Check('agents', 'incomplete', 'Connect and verify native agent runtimes'),), tuple(changed))
     except (ValueError, OSError, subprocess.SubprocessError) as exc:
         return Report(str(project), 'incomplete', (Check('init', 'incomplete', str(exc)),), tuple(changed))

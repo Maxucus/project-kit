@@ -7,6 +7,13 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
+@pytest.fixture(autouse=True)
+def no_live_clients(monkeypatch):
+    from project_kit.adapters import native
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError('Native clients are exercised separately from offline tests')
+    monkeypatch.setattr(native, 'run', unavailable)
+
 def git(root, *args):
     return subprocess.run(['git', '-C', str(root), *args], check=True, capture_output=True, text=True).stdout.strip()
 
