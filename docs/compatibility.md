@@ -15,19 +15,22 @@ Lock сохраняет полный commit kit, профиль, SHA-256 каж�
 
 | Среда/сценарий | Результат |
 | --- | --- |
-| Linux, Python 3.12.14; Node.js 24.21.0 | Автоматические lifecycle и проверки ошибок проходят |
+| Linux, Python 3.11.16 / 3.12.14 / 3.14.4; Node.js 24.21.0 | 69 тестов проходят на каждой версии Python |
 | CSV CLI | Кавычки/переносы, путь с пробелами, неверный путь, сохранение требований |
 | HTTP API | JSON `/health`, 404, временный локальный порт |
 | Два проекта, разные pins | Изоляция, повторный init, upgrade/merge/restore с подставленным нативным инвентарём |
-| Codex CLI 0.159.1 | API доступен; живая загрузка упирается в доверие к новому проекту |
-| Claude Code 2.1.283 | Проектные настройки подготовлены; локальные пакеты ещё требуют установки |
+| Codex CLI 0.159.1 | После временного доверия config активен; пакеты требуют нативной установки, проектной области установки нет |
+| Claude Code 2.1.283 | Все три пакета устанавливаются через project scope; CSV-проект загрузил собственные skills и Superpowers; проверка останавливается на hooks |
 
 Первый живой smoke-test: commit kit `812d51f42d7a45cb39ce5e514133b0e029b8dfaf`, bundle `4c916fc11056ad3d354b843af940025f578dfaa8cf9d337b54f422d88e1f82e2`, отдельные CSV/API проекты. Оба остались `incomplete`, applied lock не записан. Сырые логи, авторизация и пользовательские конфигурации не сохраняются.
+
+Повтор с разрешённым временным доверием Codex и project-install Claude: оба проекта остаются `incomplete`. CSV дошёл до проверки hooks Superpowers, значит предыдущие проверки содержимого/skills собственных и Superpowers прошли. В API-проекте нативный запуск не подтвердил загрузку project-kit. Это частичное evidence, не подтверждение всей матрицы. Временные записи доверия удалены; глобальное включение плагинов не изменялось.
 
 ## Условия клиента
 
 - Codex игнорирует проектный config без доверия. Открой checkout в Codex, проверь доверие и повтори init. Hooks имеют собственное доверие; adapter его не обходит. [Проектные плагины](https://developers.openai.com/plugins/build/plugins#enable-or-disable-a-plugin-for-a-repo).
-- Claude требует установки пакетов из созданного marketplace: в каталоге проекта выполни `claude plugin install PACKAGE@MARKETPLACE --scope project`. Точный ID печатается в диагностике. Повтори для выбранных пакетов, перезапусти клиент и повтори init. [Marketplaces](https://code.claude.com/docs/en/plugin-marketplaces).
+- `codex plugin add` в проверенной версии устанавливает и включает плагин глобально, без project scope. Toolkit не выполняет эту операцию автоматически. Один config каталога не доказывает установку; полная изоляция двух native pins пока не подтверждена.
+- Claude: сначала зарегистрируй каталог `claude plugin marketplace add /absolute/project/.project-kit/runtime/BUNDLE_DIGEST --scope local`, затем в каталоге проекта выполни `claude plugin install PACKAGE@MARKETPLACE --scope project`. Путь уже записан в `.claude/settings.local.json`, ID — в диагностике. Повтори для выбранных пакетов, перезапусти клиент и повтори init. [Marketplaces](https://code.claude.com/docs/en/plugin-marketplaces).
 - Claude `system/init` подтверждает plugins/skills/MCP, но не все регистрации hooks. Adapter оставляет bundled hooks в `incomplete`: доверие само по себе это ограничение не снимает.
 - Codex MCP готов только при наблюдаемом подключении каждого заявленного сервера; недоступное подтверждение остаётся `incomplete`.
 - Чужой Codex marketplace не переименовывается автоматически: это меняет IDs его плагинов. Возвращается конфликт для адресного объединения.
