@@ -6,7 +6,7 @@ from pathlib import Path
 import subprocess
 from string import Template
 import yaml
-from .files import contained_path, merge_owned, write_atomic, owned_digest
+from .files import contained_path, merge_owned, write_atomic, owned_digest, visible_state
 from .models import Bundle, Check, Lock, Package, ProjectIntent, Report
 from .sources import digest_data, verify_bundle
 
@@ -107,7 +107,9 @@ def initialize(project: Path, intent: ProjectIntent, bundle: Bundle) -> Report:
         for index, argv in enumerate(intent.generation):
             if index < state['generated']:
                 continue
+            before = visible_state(project)
             result = subprocess.run(list(argv), cwd=project, capture_output=True, timeout=300)
+            changed.extend(p for p, value in visible_state(project).items() if before.get(p) != value and p not in changed)
             if result.returncode:
                 raise ValueError(f'generation step {index + 1} failed (exit {result.returncode}); resolve before resuming init')
             state['generated'] = index + 1

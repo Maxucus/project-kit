@@ -99,9 +99,16 @@ def _plugin_root(skill_path, agent):
     raise NativeError('Native skill has no attributable plugin root')
 
 
+def _selected_names(project):
+    from ..files import contained_path
+    catalog = json.loads(contained_path(project, '.agents/plugins/marketplace.json').read_text())
+    return {p['name'] for p in catalog['plugins'] if p.get('source', {}).get('path', '').startswith('./.project-kit/runtime/')}
+
+
 def _codex_runtime(project):
     # CLI inventory is also checked: discovery must not be confused with installation.
     installed = {r['id'] for r in inventory('codex', project)}
+    names = _selected_names(project)
     with CodexRPC(project) as rpc:
         skills_data = rpc.call('skills/list', {'cwds': [str(project.resolve())], 'forceReload': True})
         hooks_data = rpc.call('hooks/list', {'cwds': [str(project.resolve())]})
@@ -112,7 +119,7 @@ def _codex_runtime(project):
         packages = []
         for market in plugins_data['marketplaces']:
             for row in market['plugins']:
-                if not row['enabled'] or not row['installed'] or row['id'] not in installed:
+                if row['name'] not in names or not row['enabled'] or not row['installed'] or row['id'] not in installed:
                     continue
                 paths = [s['path'] for s in skills if s.get('pluginId') == row['id']]
                 if not paths:
@@ -134,6 +141,7 @@ def _codex_runtime(project):
 
 def _claude_runtime(project):
     rows = inventory('claude-code', project)
+    names = _selected_names(project)
     process = subprocess.Popen(['claude', '-p', '--output-format', 'stream-json', '--verbose',
                                 '--no-session-persistence', '--max-budget-usd', '0.01', '--permission-mode', 'plan',
                                 'Reply OK without using tools.'], cwd=project, stdout=subprocess.PIPE,
@@ -155,7 +163,7 @@ def _claude_runtime(project):
             active = {p.get('name'): p for p in event.get('plugins', [])}
             packages = []
             for row in rows:
-                if not row['enabled'] or not (row['id'] in active or row['name'] in active):
+                if row['name'] not in names or not row['enabled'] or not (row['id'] in active or row['name'] in active):
                     continue
                 root = Path(row['root'])
                 run(['claude', 'plugin', 'validate', str(root)], project)

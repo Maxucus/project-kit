@@ -110,3 +110,25 @@ def test_initialize_connects_both_adapters(tmp_path,intent_data,bundle,native):
     assert (root/'.claude/settings.json').exists()
     state=json.loads((root/'.project-kit/operation.json').read_text())
     assert '.codex/config.toml' in state['candidate']['owned_settings']
+
+def test_native_probe_does_not_inspect_unrelated_plugins(tmp_path,bundle,native,monkeypatch):
+    from project_kit.adapters import configure,marketplace_name
+    configure(tmp_path,bundle)
+    identifier='project-kit@'+marketplace_name(bundle)
+    paths=[str(p) for p in (bundle.packages[0].root/'skills').glob('*/SKILL.md')]
+    rows=[{'id':identifier,'name':'project-kit','enabled':True,'installed':True},
+          {'id':'foreign@other','name':'foreign','enabled':True,'installed':True}]
+    monkeypatch.setattr(native,'inventory',lambda *args:rows)
+    class Transport:
+        def __init__(self,*args):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def call(self,method,params):
+            if method=='skills/list':
+                return {'data':[{'skills':[{'path':p,'pluginId':r['id'],'enabled':True} for r in rows for p in paths],'errors':[]}]}
+            if method=='hooks/list':return {'data':[{'hooks':[],'errors':[]}]}
+            if method=='plugin/list':return {'marketplaces':[{'path':'catalog','plugins':rows}]}
+            if method=='plugin/read':return {'plugin':{'mcpServers':[]}}
+            raise AssertionError('unexpected native method')
+    monkeypatch.setattr(native,'CodexRPC',Transport)
+    assert [p['id'] for p in native._codex_runtime(tmp_path)['packages']]==[identifier]

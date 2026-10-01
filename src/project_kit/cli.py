@@ -6,8 +6,23 @@ from pathlib import Path
 from typing import Sequence
 from .config import load_config, load_intent
 from .init import initialize, restore
-from .files import contained_path
+from .files import contained_path, visible_state
 from .sources import prepare_bundle
+
+
+def _tree(paths):
+    root = {}
+    for relative in paths:
+        cursor = root
+        for part in Path(relative).parts:
+            cursor = cursor.setdefault(part, {})
+    def emit(node, prefix=''):
+        entries = sorted(node.items())
+        for index, (name, children) in enumerate(entries):
+            last = index == len(entries) - 1
+            print(prefix + ('└── ' if last else '├── ') + name + ('/' if children else ''))
+            emit(children, prefix + ('    ' if last else '│   '))
+    emit(root)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -50,9 +65,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     else:
         print(f'{report.status}: {report.project}')
         for check in report.checks:
-            print(f'  {check.status}: {check.name}: {check.detail}')
-        if report.files:
-            print('Changed files:')
-            for relative in report.files:
-                print(f'  {relative}')
+            if check.status != 'ready':
+                print(f'  {check.status}: {check.name}: {check.detail}')
+        print(f'  Checks passed: {sum(c.status == "ready" for c in report.checks)}/{len(report.checks)}')
+        if args.command != 'check' and (Path(report.project) / '.git').exists():
+            _tree(visible_state(Path(report.project)))
     return 0 if report.status == 'ready' else 1

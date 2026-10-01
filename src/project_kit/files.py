@@ -4,12 +4,25 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import subprocess
 from typing import Literal
 import tomlkit
 
 
 class MergeConflict(ValueError):
     """A managed block/key was changed locally; leave all bytes untouched."""
+
+
+def visible_state(root: Path) -> dict[str, tuple[int, int]]:
+    result = subprocess.run(['git', '-C', str(root), 'ls-files', '-co', '--exclude-standard', '-z'],
+                            capture_output=True, check=True, timeout=15)
+    state = {}
+    for relative in filter(None, result.stdout.decode().split('\0')):
+        path = contained_path(root, relative)
+        if path.exists():
+            stat = path.lstat()
+            state[relative] = (stat.st_size, stat.st_mtime_ns)
+    return state
 
 
 def contained_path(root: Path, relative: str) -> Path:
