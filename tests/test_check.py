@@ -35,6 +35,20 @@ def test_same_version_wrong_digest_is_drift(ready_project):
     (root/'core/entry.md').write_text('changed payload')
     assert check_project(ready_project,True).status=='drift'
 
+def test_drifted_payload_is_never_launched(ready_project,monkeypatch):
+    from project_kit.check import check_project
+    from project_kit.adapters import native
+    catalog=json.loads((ready_project/'.agents/plugins/marketplace.json').read_text())
+    root=ready_project/catalog['plugins'][0]['source']['path']
+    (root/'core/entry.md').write_text('changed payload')
+    launched=[]
+    def observe(*args):
+        launched.append(args)
+        return {'packages':[],'errors':[]}
+    monkeypatch.setattr(native,'runtime',observe)
+    assert check_project(ready_project,True).status=='drift'
+    assert launched==[]
+
 def test_stale_observation_incomplete(ready_project,monkeypatch):
     from project_kit.adapters import codex,Observation
     from project_kit.models import Check

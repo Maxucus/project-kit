@@ -106,10 +106,13 @@ def _selected_names(project):
 
 
 def _codex_runtime(project):
-    # CLI inventory is also checked: discovery must not be confused with installation.
-    installed = {r['id'] for r in inventory('codex', project)}
-    names = _selected_names(project)
     with CodexRPC(project) as rpc:
+        config = rpc.call('config/read', {'cwd': str(project.resolve()), 'includeLayers': True})
+        if any(layer.get('name', {}).get('type') == 'project' and layer.get('disabledReason') for layer in config.get('layers') or []):
+            raise NativeError('Codex project config is disabled: open this project in Codex, review project trust, then retry init')
+        # Discovery must not be confused with installation.
+        installed = {r['id'] for r in inventory('codex', project)}
+        names = _selected_names(project)
         skills_data = rpc.call('skills/list', {'cwds': [str(project.resolve())], 'forceReload': True})
         hooks_data = rpc.call('hooks/list', {'cwds': [str(project.resolve())]})
         plugins_data = rpc.call('plugin/list', {'cwds': [str(project.resolve())], 'marketplaceKinds': ['local']})
@@ -135,7 +138,9 @@ def _codex_runtime(project):
                                  'root': str(_plugin_root(paths[0], 'codex')), 'skills': paths,
                                  'hooks': [{'ready': h['enabled'] and h['trustStatus'] in ('trusted', 'managed')}
                                            for h in hooks if h.get('pluginId') == row['id']],
-                                 'mcp': [{'ready': any(s.get('serverInfo') and not s.get('toolsError') for s in statuses)} for _ in declared_mcp]})
+                                 'mcp': [{'ready': any(s['name'] == server and s.get('runtimeStatus') == 'connected'
+                                                      and bool(s.get('serverInfo')) and not s.get('toolsError')
+                                                      for s in statuses)} for server in declared_mcp]})
         return {'packages': packages, 'errors': errors}
 
 

@@ -124,6 +124,7 @@ def test_native_probe_does_not_inspect_unrelated_plugins(tmp_path,bundle,native,
         def __enter__(self):return self
         def __exit__(self,*args):pass
         def call(self,method,params):
+            if method=='config/read':return {'layers':[]}
             if method=='skills/list':
                 return {'data':[{'skills':[{'path':p,'pluginId':r['id'],'enabled':True} for r in rows for p in paths],'errors':[]}]}
             if method=='hooks/list':return {'data':[{'hooks':[],'errors':[]}]}
@@ -132,3 +133,40 @@ def test_native_probe_does_not_inspect_unrelated_plugins(tmp_path,bundle,native,
             raise AssertionError('unexpected native method')
     monkeypatch.setattr(native,'CodexRPC',Transport)
     assert [p['id'] for p in native._codex_runtime(tmp_path)['packages']]==[identifier]
+
+def test_untrusted_codex_project_reports_required_action(tmp_path,native,monkeypatch):
+    class Transport:
+        def __init__(self,*args):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def call(self,method,params):
+            if method=='config/read':
+                return {'layers':[{'name':{'type':'project'},'disabledReason':'project is not trusted'}]}
+            return {'data':[],'marketplaces':[]}
+    monkeypatch.setattr(native,'CodexRPC',Transport)
+    with pytest.raises(native.NativeError,match='trust'):
+        native._codex_runtime(tmp_path)
+
+def test_codex_checks_each_mcp_server_individually(tmp_path,bundle,native,monkeypatch):
+    from project_kit.adapters import configure,marketplace_name
+    configure(tmp_path,bundle)
+    identifier='project-kit@'+marketplace_name(bundle)
+    path=str(next((bundle.packages[0].root/'skills').glob('*/SKILL.md')))
+    rows=[{'id':identifier,'name':'project-kit','enabled':True,'installed':True}]
+    monkeypatch.setattr(native,'inventory',lambda *args:rows)
+    class Transport:
+        def __init__(self,*args):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def call(self,method,params):
+            if method=='config/read':return {'layers':[]}
+            if method=='skills/list':return {'data':[{'skills':[{'path':path,'pluginId':identifier,'enabled':True}],'errors':[]}]}
+            if method=='hooks/list':return {'data':[{'hooks':[],'errors':[]}]}
+            if method=='plugin/list':return {'marketplaces':[{'path':'catalog','plugins':rows}]}
+            if method=='plugin/read':return {'plugin':{'mcpServers':['first','second']}}
+            if method=='mcpServerStatus/list':return {'data':[
+                {'name':'first','pluginId':identifier,'serverInfo':{'name':'one'},'runtimeStatus':'connected'},
+                {'name':'second','pluginId':identifier,'serverInfo':None,'toolsError':'unavailable','runtimeStatus':'failed'}]}
+            raise AssertionError(method)
+    monkeypatch.setattr(native,'CodexRPC',Transport)
+    assert native._codex_runtime(tmp_path)['packages'][0]['mcp']==[{'ready':True},{'ready':False}]

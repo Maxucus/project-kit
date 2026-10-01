@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+import urllib.error
 import pytest
 import yaml
 from conftest import ROOT,commit,git
@@ -41,6 +42,9 @@ def test_lifecycle(kind,tmp_path,kit,ready_clients,capsys):
             with urllib.request.urlopen(f'http://127.0.0.1:{port}/health',timeout=3) as response:
                 assert response.status==200
                 assert json.load(response)=={'status':'ok'}
+            with pytest.raises(urllib.error.HTTPError) as error:
+                urllib.request.urlopen(f'http://127.0.0.1:{port}/absent',timeout=3)
+            assert error.value.code==404
         finally:
             selector.close();process.terminate();process.wait(timeout=5);process.stdout.close()
     # Every accepted field must remain available to a reader, including the stack reason.

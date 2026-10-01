@@ -87,6 +87,9 @@ def check_project(project: Path, runtime: bool, expected: Lock | None = None) ->
         bundle = bundle_for_lock(project, lock)
         checks.extend(verify_bundle(bundle))
         checks.extend(audit_prompts(project, bundle))
+        if aggregate(checks) != 'ready':
+            checks.append(Check('runtime', 'incomplete', 'Fix local configuration/payload checks before launching clients'))
+            return Report(str(project), aggregate(checks), tuple(checks))
         for agent in bundle.profile['agents']:
             check, observation = adapter(agent).observe(project, bundle, runtime)
             if check.status == 'ready':

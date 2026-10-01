@@ -1,0 +1,18 @@
+# Замените значения требованиями своего проекта перед init.
+name: CSV Counter
+goal: Посчитать записи CSV без заголовка.
+users: [Аналитик]
+scope: Один локальный файл; сеть и база данных вне задачи.
+constraints: [UTF-8, Стандартная библиотека Python, Пути с пробелами]
+decisions:
+  - "Python csv: корректные кавычки и переносы; отдельная библиотека не нужна."
+success:
+  - Заголовок и две записи дают stdout 2.
+  - Неверный путь даёт ненулевой exit.
+task_source: GitHub Issues проекта
+commands:
+  run: [python, app.py, input.csv]
+  check: [python, app.py, input.csv]
+# Каждый шаг генератора — argv, без shell.
+# Пустой список создаёт только контекст; app.py нужно реализовать отдельно.
+generation: []
