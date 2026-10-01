@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 from .config import read_yaml, config_from_data
 from .models import Bundle, Check, KitConfig, Package, Lock
+from .files import contained_path
 
 
 def git(root: Path, *args: str) -> str:
@@ -103,10 +104,10 @@ def prepare_bundle(kit: Path, config: KitConfig, cache: Path) -> Bundle:
             _snapshot(source, root)
             packages.append(Package(name, root, pin, digest_tree(root)))
         digest = digest_data({'commit': commit, 'profile': profile, 'packages': {p.name: p.digest for p in packages}})
-        final = cache / digest
+        final = contained_path(cache, digest)
         if final.exists():
             for package in packages:
-                if digest_tree(final / package.name) != package.digest:
+                if digest_tree(contained_path(final, package.name)) != package.digest:
                     raise ValueError(f'drift in cached package: {package.name}')
         else:
             stage.rename(final)
@@ -134,16 +135,23 @@ def restore_bundle(lock: Lock, cache: Path) -> Bundle:
     if local.is_dir() and git(local, 'rev-parse', 'HEAD') == lock.kit_commit:
         source = local
     else:
-        source = cache / 'sources' / lock.kit_commit
+        source = contained_path(cache, f'sources/{lock.kit_commit}')
         if not source.exists():
             source.parent.mkdir(parents=True, exist_ok=True)
             result = subprocess.run(['git', 'clone', '--no-checkout', '--no-hardlinks', '--', lock.kit_source, str(source)],
                                     capture_output=True, timeout=120)
             if result.returncode:
                 raise ValueError('Pinned kit source unavailable; configure Git access and retry init')
+        for option in ('--absolute-git-dir', '--git-common-dir'):
+            metadata = Path(git(source, 'rev-parse', option))
+            metadata = metadata if metadata.is_absolute() else source / metadata
+            if not metadata.resolve().is_relative_to(source.resolve()):
+                raise ValueError('Cached Git metadata points outside source checkout')
+        if Path(git(source, 'rev-parse', '--show-toplevel')).resolve() != source.resolve():
+            raise ValueError('Cached Git worktree points outside source checkout')
         git(source, 'checkout', '--detach', lock.kit_commit)
         git(source, 'submodule', 'update', '--init', '--recursive')
-    bundle = prepare_bundle(source, config, cache / 'bundles')
+    bundle = prepare_bundle(source, config, contained_path(cache, 'bundles'))
     if bundle.profile != lock.profile or {p.name: p.digest for p in bundle.packages} != lock.package_digests:
         raise ValueError('Restored source differs from applied lock')
     return bundle

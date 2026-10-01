@@ -18,14 +18,21 @@ def _baseline(project, bundle, lock):
     previous = {'.agents/plugins/marketplace.json': catalog.read_bytes()} if catalog.exists() else {}
     for agent in bundle.profile['agents']:
         result.update(adapter(agent).plan(project, bundle, baseline=previous).files)
+    catalog_key = '.agents/plugins/marketplace.json'
+    namespace = lock.owned_settings.get(catalog_key, {}).get('namespace')
+    if namespace:
+        data = json.loads(result[catalog_key])
+        data['name'] = namespace
+        result[catalog_key] = (json.dumps(data, ensure_ascii=False, indent=2) + '\n').encode()
     # Previously owned disable-overrides may disappear from today's native inventory.
     # Their baseline is determined by the pinned IDs, never by current local values.
     from .adapters import marketplace_name
     import tomlkit
-    selected = {f'{p.name}@{marketplace_name(bundle)}' for p in bundle.packages}
     for relative, entry in lock.owned_settings.items():
         if relative not in ('.codex/config.toml', '.claude/settings.json'):
             continue
+        selected = {f'{p.name}@{namespace if relative == ".codex/config.toml" and namespace else marketplace_name(bundle)}'
+                    for p in bundle.packages}
         data = {}
         for keys in entry['paths']:
             cursor = data

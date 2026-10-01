@@ -13,10 +13,15 @@ def plan(project: Path, bundle: Bundle, baseline: dict[str, bytes] | None = None
     target = contained_path(project, relative)
     existing = json.loads(target.read_text()) if target.exists() else {}
     previous = json.loads(baseline.get(relative, b'{}')) if baseline else {}
+    names = {p.name for p in bundle.packages}
+    previously_managed = {e['name'] for e in previous.get('plugins', [])
+                          if isinstance(e.get('source'), dict) and
+                          e['source'].get('path', '').startswith('./.project-kit/runtime/')}
+    entries = [e for e in existing.get('plugins', []) if e.get('name') not in names | previously_managed]
+    if entries and previous:
+        name = previous['name']  # Foreign plugin IDs must keep their namespace.
     if existing and existing.get('name') != name and existing != previous:
         raise MergeConflict('Existing Codex marketplace has another name; preserve it and resolve catalog ownership explicitly')
-    names = {p.name for p in bundle.packages}
-    entries = [e for e in existing.get('plugins', []) if e.get('name') not in names]
     entries += [{'name': p.name, 'source': {'source': 'local', 'path': f'./.project-kit/runtime/{bundle.digest}/plugins/{p.name}'},
                  'policy': {'installation': 'AVAILABLE', 'authentication': 'ON_USE'}} for p in bundle.packages]
     marketplace = {**existing, 'name': name, 'interface': existing.get('interface', {'displayName': 'Project Kit'}), 'plugins': entries}
@@ -32,6 +37,8 @@ def plan(project: Path, bundle: Bundle, baseline: dict[str, bytes] | None = None
     for package in bundle.packages:
         settings['plugins'][f'{package.name}@{name}'] = {'enabled': True}
     ownership = {'.codex/config.toml': {'kind': 'toml', 'paths': [['plugins', k, 'enabled'] for k in settings['plugins']]}}
+    ownership[relative] = {'kind': 'catalog', 'namespace': name,
+                           'paths': [['name']] + [['plugins', p.name] for p in bundle.packages]}
     return AdapterPlan({relative: encode(marketplace), '.codex/config.toml': tomlkit.dumps(settings).encode()},
                        {f'{p.name}@{name}': p.digest for p in bundle.packages}, ownership)
 

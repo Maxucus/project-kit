@@ -91,3 +91,32 @@ def test_restore_after_merge_completes_upgrade(ready_project,target_kit):
     restored=restore(ready_project)
     assert restored.status=='ready',restored
     assert not (ready_project/'.project-kit/operation.json').exists()
+
+def test_upgrade_preserves_foreign_catalog_identity(ready_project,target_kit):
+    import json
+    from project_kit.check import check_project
+    from project_kit.upgrade import prepare_upgrade
+    from project_kit.init import restore
+    catalog=ready_project/'.agents/plugins/marketplace.json'
+    data=json.loads(catalog.read_text())
+    namespace=data['name']
+    foreign={'name':'foreign','source':{'source':'local','path':'./foreign'}}
+    data['plugins'].append(foreign)
+    data['interface']['custom']='Project-owned metadata'
+    catalog.write_text(json.dumps(data))
+    with (ready_project/'.codex/config.toml').open('a') as stream:
+        stream.write(f'\n[plugins."foreign@{namespace}"]\nenabled = true\n')
+    commit(ready_project)
+    assert check_project(ready_project,True).status=='ready'
+    report=prepare_upgrade(ready_project,target_kit)
+    assert report.status=='ready',report
+    worktree=Path(report.project)
+    after=json.loads((worktree/'.agents/plugins/marketplace.json').read_text())
+    assert after['name']==namespace
+    assert foreign in after['plugins']
+    assert after['interface']['custom']=='Project-owned metadata'
+    assert f'foreign@{namespace}' in (worktree/'.codex/config.toml').read_text()
+    commit(worktree,'apply upgrade')
+    git(ready_project,'merge','--ff-only',git(worktree,'branch','--show-current'))
+    restored=restore(ready_project)
+    assert restored.status=='ready',restored

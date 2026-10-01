@@ -1,5 +1,6 @@
 """Bounded native discovery. Never prints client configuration, auth, or raw logs."""
 import json
+import os
 from pathlib import Path
 import selectors
 import subprocess
@@ -49,18 +50,41 @@ def _stop(process):
             stream.close()
 
 
+class JsonLines:
+    """Keep framing bytes ourselves: TextIO can hide unread lines from select()."""
+    def __init__(self, stream):
+        self.stream = stream
+        self.buffer = b''
+        self.selector = selectors.DefaultSelector()
+        self.selector.register(stream, selectors.EVENT_READ)
+
+    def close(self):
+        self.selector.close()
+
+    def receive(self, deadline):
+        while b'\n' not in self.buffer:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or not self.selector.select(remaining):
+                raise NativeError('Native JSON response timed out')
+            chunk = os.read(self.stream.fileno(), 65536)
+            if not chunk:
+                raise NativeError('Native response stream closed before evidence arrived')
+            self.buffer += chunk
+        line, self.buffer = self.buffer.split(b'\n', 1)
+        return json.loads(line)
+
+
 class CodexRPC:
     def __init__(self, project):
         self.process = subprocess.Popen(['codex', 'app-server', '--stdio'], cwd=project,
-                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
-        self.selector = selectors.DefaultSelector()
-        self.selector.register(self.process.stdout, selectors.EVENT_READ)
+                                        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self.reader = JsonLines(self.process.stdout)
         self.serial = 0
 
     def __enter__(self):
         try:
             self.call('initialize', {'clientInfo': {'name': 'project-kit', 'version': '0.1.0'}, 'capabilities': {'experimentalApi': True}})
-            self.process.stdin.write('{"method":"initialized"}\n')
+            self.process.stdin.write(b'{"method":"initialized"}\n')
             self.process.stdin.flush()
             return self
         except BaseException:
@@ -68,21 +92,16 @@ class CodexRPC:
             raise
 
     def __exit__(self, *args):
-        self.selector.close()
+        self.reader.close()
         _stop(self.process)
 
     def call(self, method, params):
         self.serial += 1
-        self.process.stdin.write(json.dumps({'id': self.serial, 'method': method, 'params': params}) + '\n')
+        self.process.stdin.write((json.dumps({'id': self.serial, 'method': method, 'params': params}) + '\n').encode())
         self.process.stdin.flush()
         deadline = time.monotonic() + 40
         while time.monotonic() < deadline:
-            if not self.selector.select(max(0, deadline - time.monotonic())):
-                break
-            line = self.process.stdout.readline()
-            if not line:
-                break
-            message = json.loads(line)
+            message = self.reader.receive(deadline)
             if message.get('id') != self.serial:
                 continue
             if 'error' in message:
@@ -99,8 +118,20 @@ def _plugin_root(skill_path, agent):
     raise NativeError('Native skill has no attributable plugin root')
 
 
-def _selected_names(project):
+def _selected_names(project, agent='codex'):
     from ..files import contained_path
+    if agent == 'claude-code':
+        settings = json.loads(contained_path(project, '.claude/settings.local.json').read_text())
+        enabled = json.loads(contained_path(project, '.claude/settings.json').read_text()).get('enabledPlugins', {})
+        names = set()
+        for name, entry in settings.get('extraKnownMarketplaces', {}).items():
+            if not name.startswith('project-kit-') or not any(value and key.endswith('@' + name) for key, value in enabled.items()):
+                continue
+            directory = Path(entry['source']['path'])
+            relative = directory.relative_to(project.resolve())
+            catalog = json.loads(contained_path(project, str(relative / '.claude-plugin/marketplace.json')).read_text())
+            names.update(p['name'] for p in catalog['plugins'])
+        return names
     catalog = json.loads(contained_path(project, '.agents/plugins/marketplace.json').read_text())
     return {p['name'] for p in catalog['plugins'] if p.get('source', {}).get('path', '').startswith('./.project-kit/runtime/')}
 
@@ -146,22 +177,16 @@ def _codex_runtime(project):
 
 def _claude_runtime(project):
     rows = inventory('claude-code', project)
-    names = _selected_names(project)
+    names = _selected_names(project, 'claude-code')
     process = subprocess.Popen(['claude', '-p', '--output-format', 'stream-json', '--verbose',
                                 '--no-session-persistence', '--max-budget-usd', '0.01', '--permission-mode', 'plan',
                                 'Reply OK without using tools.'], cwd=project, stdout=subprocess.PIPE,
-                               stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL, text=True)
-    selector = selectors.DefaultSelector()
-    selector.register(process.stdout, selectors.EVENT_READ)
+                               stdin=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    reader = JsonLines(process.stdout)
     try:
         deadline = time.monotonic() + 45
         while time.monotonic() < deadline:
-            if not selector.select(max(0, deadline - time.monotonic())):
-                break
-            line = process.stdout.readline()
-            if not line:
-                break
-            event = json.loads(line)
+            event = reader.receive(deadline)
             if event.get('type') != 'system' or event.get('subtype') != 'init':
                 continue
             loaded = event.get('skills', event.get('slash_commands', []))
@@ -183,7 +208,7 @@ def _claude_runtime(project):
             return {'packages': packages, 'errors': []}
         raise NativeError('Claude initialization evidence unavailable')
     finally:
-        selector.close()
+        reader.close()
         _stop(process)
 
 

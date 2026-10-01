@@ -127,12 +127,17 @@ def common_observe(agent: AgentId, project: Path, bundle: Bundle, runtime: bool)
             return Check(name, 'incomplete', 'Native client reported configuration/load errors'), None
         rows = snapshot['packages']
         observed, skills = {}, []
-        expected_ids = {f'{p.name}@{marketplace_name(bundle)}' for p in bundle.packages}
+        namespace = marketplace_name(bundle)
+        if agent == 'codex':
+            catalog = contained_path(project, '.agents/plugins/marketplace.json')
+            if catalog.exists():
+                namespace = json.loads(catalog.read_text())['name']
+        expected_ids = {f'{p.name}@{namespace}' for p in bundle.packages}
         names = {p.name for p in bundle.packages}
         if any(r['enabled'] and r['name'] in names and r['id'] not in expected_ids for r in rows):
             return Check(name, 'drift', 'Another version of a selected package is active; disable it in project settings'), None
         for package in bundle.packages:
-            identifier = f'{package.name}@{marketplace_name(bundle)}'
+            identifier = f'{package.name}@{namespace}'
             matches = [r for r in rows if r['id'] == identifier and r['enabled']]
             if len(matches) != 1:
                 return Check(name, 'incomplete', f'{identifier}: install/enable in this project and restart client'), None

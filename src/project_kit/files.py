@@ -85,8 +85,26 @@ def _put(data, keys, value):
         data[keys[-1]] = value
 
 
+def _parse_owned(content: bytes, kind: str):
+    if kind == 'toml':
+        return tomlkit.parse(content.decode())
+    data = json.loads(content or b'{}')
+    if kind == 'catalog':
+        entries = data.get('plugins', [])
+        if not isinstance(entries, list):
+            raise MergeConflict('Marketplace plugins must be a list')
+        named = {}
+        for entry in entries:
+            name = entry.get('name')
+            if not isinstance(name, str) or name in named:
+                raise MergeConflict('Marketplace plugin names must be unique strings')
+            named[name] = entry
+        data['plugins'] = named
+    return data
+
+
 def merge_owned(current: bytes, baseline: bytes, desired: bytes,
-                kind: Literal['markdown', 'json', 'toml'], owned: tuple[tuple[str, ...], ...]) -> bytes:
+                kind: Literal['markdown', 'json', 'toml', 'catalog'], owned: tuple[tuple[str, ...], ...]) -> bytes:
     if kind == 'markdown':
         old, local, new = (_block(c) for c in (baseline, current, desired))
         old_bytes, local_bytes, new_bytes = (m.group() if m else b'' for m in (old, local, new))
@@ -97,9 +115,9 @@ def merge_owned(current: bytes, baseline: bytes, desired: bytes,
         if local:
             return current[:local.start()] + new_bytes + current[local.end():]
         return current + (b'\n' if current and not current.endswith(b'\n') else b'') + new_bytes
-    parser = json.loads if kind == 'json' else tomlkit.parse
-    old, local, new = (parser(c.decode() or '{}') if kind == 'json' else parser(c.decode())
-                       for c in (baseline, current, desired))
+    old, local, new = (_parse_owned(c, kind) for c in (baseline, current, desired))
+    if not current and not baseline:
+        return desired
     changed = False
     for keys in owned:
         before, present, after = (_get(d, keys) for d in (old, local, new))
@@ -111,7 +129,9 @@ def merge_owned(current: bytes, baseline: bytes, desired: bytes,
         changed = True
     if not changed:
         return current
-    return ((json.dumps(local, ensure_ascii=False, indent=2) + '\n') if kind == 'json' else tomlkit.dumps(local)).encode()
+    if kind == 'catalog':
+        local['plugins'] = list(local['plugins'].values())
+    return (tomlkit.dumps(local) if kind == 'toml' else json.dumps(local, ensure_ascii=False, indent=2) + '\n').encode()
 
 
 def owned_digest(content: bytes, kind: str, paths: tuple[tuple[str, ...], ...]) -> str:
@@ -120,7 +140,7 @@ def owned_digest(content: bytes, kind: str, paths: tuple[tuple[str, ...], ...]) 
     if kind == 'markdown':
         match = _block(content)
         return digest_data(match.group().decode() if match else '')
-    data = json.loads(content) if kind == 'json' else tomlkit.parse(content.decode())
+    data = _parse_owned(content, kind)
     values = []
     for keys in paths:
         value = _get(data, keys)

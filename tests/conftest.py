@@ -63,13 +63,26 @@ def ready_clients(monkeypatch):
     monkeypatch.setattr(native,'version',lambda *args:'fixture-client-1')
     monkeypatch.setattr(native,'inventory',lambda *args:[])
     def observed(agent,project):
-        market=json.loads((project/'.agents/plugins/marketplace.json').read_text())
+        if agent=='codex':
+            catalogs=[(project,json.loads((project/'.agents/plugins/marketplace.json').read_text()))]
+            enabled=None
+        else:
+            settings=json.loads((project/'.claude/settings.local.json').read_text())
+            enabled=json.loads((project/'.claude/settings.json').read_text())['enabledPlugins']
+            catalogs=[]
+            for entry in settings['extraKnownMarketplaces'].values():
+                base=Path(entry['source']['path'])
+                catalogs.append((base,json.loads((base/'.claude-plugin/marketplace.json').read_text())))
         packages=[]
-        for entry in market['plugins']:
-            root=project/entry['source']['path']
-            packages.append({'id':entry['name']+'@'+market['name'],'name':entry['name'],'enabled':True,
-                             'root':str(root),'skills':[str(p) for p in (root/'skills').glob('*/SKILL.md')],
-                             'hooks':[],'mcp':[]})
+        for base,market in catalogs:
+            for entry in market['plugins']:
+                identifier=entry['name']+'@'+market['name']
+                if enabled is not None and not enabled.get(identifier):continue
+                source=entry['source']
+                root=base/(source['path'] if isinstance(source,dict) else source)
+                packages.append({'id':identifier,'name':entry['name'],'enabled':True,
+                                 'root':str(root),'skills':[str(p) for p in (root/'skills').glob('*/SKILL.md')],
+                                 'hooks':[],'mcp':[]})
         return {'packages':packages,'errors':[]}
     monkeypatch.setattr(native,'runtime',observed)
     return native

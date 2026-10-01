@@ -116,7 +116,12 @@ def initialize(project: Path, intent: ProjectIntent, bundle: Bundle) -> Report:
             write_atomic(operation, (json.dumps(state, ensure_ascii=False, indent=2) + '\n').encode())
         from .adapters import configure
         baseline = {k: v.encode() for k, v in state.get('adapter_baseline', {}).items()}
-        adapter_writes, ownership, expected = configure(project, bundle, baseline)
+        if state.get('restore') and not baseline:
+            from .upgrade import _baseline
+            from .config import lock_from_data
+            baseline = _baseline(project, bundle, lock_from_data(state['candidate']))
+            baseline.pop('.claude/settings.local.json', None)  # Recreate machine-local paths after clone/merge.
+        adapter_writes, ownership, expected = configure(project, bundle, baseline, state['candidate']['owned_settings'])
         changed.extend(p for p in adapter_writes if not p.startswith('.project-kit/runtime/') and p != '.claude/settings.local.json')
         state['adapter_baseline'] = {k: v.decode() for k, v in expected.items()}
         state['candidate'] = json_data(make_lock(intent, bundle, {**rendered, **expected}, ownership))

@@ -170,3 +170,41 @@ def test_codex_checks_each_mcp_server_individually(tmp_path,bundle,native,monkey
             raise AssertionError(method)
     monkeypatch.setattr(native,'CodexRPC',Transport)
     assert native._codex_runtime(tmp_path)['packages'][0]['mcp']==[{'ready':True},{'ready':False}]
+
+def test_claude_only_profile_discovers_native_skills(tmp_path,bundle,native,monkeypatch):
+    import sys
+    from project_kit.adapters import configure,marketplace_name,claude_code
+    single=replace(bundle,profile={**bundle.profile,'agents':['claude-code']})
+    configure(tmp_path,single)
+    assert not (tmp_path/'.agents/plugins/marketplace.json').exists()
+    package=single.packages[0]
+    identifier='project-kit@'+marketplace_name(single)
+    monkeypatch.setattr(native,'inventory',lambda *args:[{'id':identifier,'name':'project-kit','enabled':True,'root':str(package.root)}])
+    monkeypatch.setattr(native,'run',lambda *args:'validated')
+    event={'type':'system','subtype':'init','plugins':[{'name':identifier}],
+           'skills':['project-kit:'+p.parent.name for p in (package.root/'skills').glob('*/SKILL.md')], 'mcp_servers':[]}
+    popen=native.subprocess.Popen
+    def spawn(argv,**kwargs):
+        return popen([sys.executable,'-u','-c','import sys,time; print(sys.argv[1],flush=True); time.sleep(5)',json.dumps(event)],**kwargs)
+    monkeypatch.setattr(native.subprocess,'Popen',spawn)
+    monkeypatch.setattr(native,'runtime',lambda agent,project:native._claude_runtime(project))
+    check,observation=claude_code.observe(tmp_path,single,True)
+    assert check.status=='ready',check
+    assert observation.loaded_skills
+
+def test_codex_consumes_response_buffered_after_notification(tmp_path,native,monkeypatch):
+    import sys
+    popen=native.subprocess.Popen
+    server='import sys,time; sys.stdin.readline(); sys.stdout.write(\'{{"method":"notice"}}\\n{{"id":1,"result":{{}}}}\\n\'); sys.stdout.flush(); time.sleep(5)'.replace('{{','{').replace('}}','}')
+    def spawn(argv,**kwargs):
+        return popen([sys.executable,'-u','-c',server],**kwargs)
+    monkeypatch.setattr(native.subprocess,'Popen',spawn)
+    factory=native.selectors.DefaultSelector
+    class BoundedSelector:
+        def __init__(self):self.selector=factory()
+        def register(self,*args):return self.selector.register(*args)
+        def select(self,timeout):return self.selector.select(min(timeout,0.2))
+        def close(self):self.selector.close()
+    monkeypatch.setattr(native.selectors,'DefaultSelector',BoundedSelector)
+    with native.CodexRPC(tmp_path):
+        pass
